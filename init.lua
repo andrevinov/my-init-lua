@@ -278,11 +278,88 @@ vim.api.nvim_create_autocmd("FileType", {
 })
 
 
+local uv = vim.uv or vim.loop
+
+local function path_exists(path, expected_type)
+  local stat = uv.fs_stat(path)
+  return stat and stat.type == expected_type
+end
+
+local function find_upwards(start_dir, callback)
+  local dir = vim.fn.fnamemodify(start_dir, ":p")
+
+  while dir and dir ~= "" do
+    dir = dir:gsub("/+$", "")
+
+    local result = callback(dir)
+    if result then
+      return result, dir
+    end
+
+    local parent = vim.fn.fnamemodify(dir, ":h")
+    if parent == dir then
+      break
+    end
+
+    dir = parent
+  end
+
+  return nil, nil
+end
+
+local function get_python_runner(file)
+  local file_dir = vim.fn.fnamemodify(file, ":p:h")
+
+  local venv_python, venv_root = find_upwards(file_dir, function(dir)
+    local python = dir .. "/.venv/bin/python"
+
+    if path_exists(python, "file") then
+      return vim.fn.shellescape(python)
+    end
+  end)
+
+  if venv_python then
+    return venv_python, venv_root
+  end
+
+  local _, project_root = find_upwards(file_dir, function(dir)
+    return path_exists(dir .. "/pyproject.toml", "file")
+      or path_exists(dir .. "/poetry.lock", "file")
+      or path_exists(dir .. "/.git", "directory")
+  end)
+
+  if project_root
+      and path_exists(project_root .. "/poetry.lock", "file")
+      and vim.fn.executable("poetry") == 1 then
+    return "poetry run python", project_root
+  end
+
+  return "python3", project_root or file_dir
+end
+
+local function run_python_file()
+  vim.cmd("write")
+
+  local file = vim.fn.expand("%:p")
+  local runner, root = get_python_runner(file)
+  local command = "cd "
+    .. vim.fn.shellescape(root)
+    .. " && "
+    .. runner
+    .. " "
+    .. vim.fn.shellescape(file)
+
+  vim.cmd("!" .. command)
+end
+
 vim.api.nvim_create_autocmd('FileType', {
   pattern = 'python',
   callback = function()
-    map('n', '<leader>r', ':w<CR>:!python3 %<CR>', { buffer = true })
-    map('i', '<leader>r', '<Esc>:w<CR>:!python3 %<CR>', { buffer = true })
+    map('n', '<leader>r', run_python_file, { buffer = true, desc = 'Run Python file' })
+    map('i', '<leader>r', function()
+      vim.cmd('stopinsert')
+      run_python_file()
+    end, { buffer = true, desc = 'Run Python file' })
     vim.opt_local.expandtab = true
     vim.opt_local.shiftwidth = 4
     vim.opt_local.tabstop = 4
