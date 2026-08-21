@@ -60,6 +60,8 @@ function _G.CodexToggle(width)
   codex_panel.prev_win = vim.api.nvim_get_current_win()
 
   -- Cria uma split vertical sempre na extrema direita.
+  -- O vsplit nasce mostrando o mesmo buffer da janela principal;
+  -- por isso o terminal do Codex recebe um buffer próprio logo abaixo.
   vim.cmd('botright vsplit')
   codex_panel.win = vim.api.nvim_get_current_win()
 
@@ -67,8 +69,11 @@ function _G.CodexToggle(width)
     -- Reusa o mesmo terminal/Codex ao reabrir o painel.
     vim.api.nvim_set_current_buf(codex_panel.buf)
   else
-    -- Primeiro uso: cria um terminal persistente no diretório atual.
-    codex_panel.buf = vim.api.nvim_get_current_buf()
+    -- Primeiro uso: cria um buffer exclusivo para o painel.
+    -- Assim o termopen() não transforma também o buffer da janela principal.
+    codex_panel.buf = vim.api.nvim_create_buf(false, false)
+    vim.api.nvim_set_current_buf(codex_panel.buf)
+
     codex_panel.job = vim.fn.termopen(vim.o.shell, {
       detach = 0,
       cwd = vim.fn.getcwd(),
