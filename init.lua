@@ -864,39 +864,23 @@ local function find_replacement_buffer(current)
   return nil
 end
 
-local function listed_file_buffer_count()
-  local count = 0
+local function open_unlisted_empty_buffer()
+  local empty = vim.api.nvim_create_buf(false, true)
 
-  for _, info in ipairs(vim.fn.getbufinfo({ buflisted = 1 })) do
-    local bufnr = info.bufnr
+  vim.bo[empty].buflisted = false
+  vim.bo[empty].buftype = "nofile"
+  vim.bo[empty].bufhidden = "wipe"
+  vim.bo[empty].swapfile = false
 
-    if vim.api.nvim_buf_is_valid(bufnr)
-        and vim.api.nvim_buf_is_loaded(bufnr)
-        and vim.bo[bufnr].buftype == ""
-        and vim.api.nvim_buf_get_name(bufnr) ~= "" then
-      count = count + 1
-    end
-  end
-
-  return count
-end
-
-local function quit_all(force)
-  pcall(vim.cmd, force and "quitall!" or "quitall")
-  vim.schedule(cleanup_no_name_buffers)
+  vim.api.nvim_win_set_buf(0, empty)
 end
 
 local function smart_quit(force)
   local current = vim.api.nvim_get_current_buf()
 
-  -- Buffers especiais continuam se comportando como janela.
-  -- Exceção: NvimTree sozinho, ou com um único arquivo real, fecha tudo.
+  -- Buffers especiais continuam se comportando como janela:
+  -- terminal, NvimTree, help, quickfix, Telescope etc.
   if vim.bo[current].buftype ~= "" then
-    if vim.bo[current].filetype == "NvimTree" and listed_file_buffer_count() <= 1 then
-      quit_all(force)
-      return
-    end
-
     pcall(vim.cmd, force and "quit!" or "quit")
     vim.schedule(cleanup_no_name_buffers)
     return
@@ -913,12 +897,13 @@ local function smart_quit(force)
 
   local replacement = find_replacement_buffer(current)
 
-  if not replacement then
-    quit_all(force)
-    return
+  if replacement then
+    vim.api.nvim_win_set_buf(0, replacement)
+  else
+    -- O Neovim sempre precisa mostrar algum buffer numa janela.
+    -- Então criamos um vazio, mas NÃO listado.
+    open_unlisted_empty_buffer()
   end
-
-  vim.api.nvim_win_set_buf(0, replacement)
 
   pcall(vim.api.nvim_buf_delete, current, { force = force })
 
