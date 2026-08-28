@@ -349,7 +349,20 @@ local function run_python_file()
     .. " "
     .. vim.fn.shellescape(file)
 
-  vim.cmd("!" .. command)
+  local output = vim.fn.system(command)
+  local exit_code = vim.v.shell_error
+  local cleaned_output = output:gsub("\n$", "")
+
+  if cleaned_output ~= "" then
+    vim.api.nvim_echo({ { cleaned_output } }, true, {})
+  end
+
+  if exit_code ~= 0 then
+    vim.notify(
+      "Python terminou com código " .. exit_code,
+      vim.log.levels.ERROR
+    )
+  end
 end
 
 vim.api.nvim_create_autocmd('FileType', {
