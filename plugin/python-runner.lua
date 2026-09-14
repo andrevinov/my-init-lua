@@ -180,25 +180,38 @@ vim.api.nvim_create_user_command('PythonRun', run_python_file, {
   desc = 'Executar arquivo Python em terminal interativo',
 })
 
+local function attach_python_runner(buf)
+  if not valid_buf(buf) or vim.bo[buf].filetype ~= 'python' then
+    return
+  end
+
+  vim.keymap.set('n', '<leader>r', run_python_file, {
+    buffer = buf,
+    silent = true,
+    desc = 'Run Python file (interactive)',
+  })
+
+  vim.keymap.set('i', '<leader>r', function()
+    vim.cmd('stopinsert')
+    run_python_file()
+  end, {
+    buffer = buf,
+    silent = true,
+    desc = 'Run Python file (interactive)',
+  })
+end
+
 local group = vim.api.nvim_create_augroup('InteractivePythonRunner', { clear = true })
 
 vim.api.nvim_create_autocmd('FileType', {
   group = group,
   pattern = 'python',
   callback = function(args)
-    vim.keymap.set('n', '<leader>r', run_python_file, {
-      buffer = args.buf,
-      silent = true,
-      desc = 'Run Python file (interactive)',
-    })
-
-    vim.keymap.set('i', '<leader>r', function()
-      vim.cmd('stopinsert')
-      run_python_file()
-    end, {
-      buffer = args.buf,
-      silent = true,
-      desc = 'Run Python file (interactive)',
-    })
+    -- O init.lua também define <leader>r para Python. Agendamos este
+    -- attach para o fim do evento e garantimos que o runner interativo
+    -- seja o mapeamento efetivo, inclusive se o init.lua for recarregado.
+    vim.schedule(function()
+      attach_python_runner(args.buf)
+    end)
   end,
 })
