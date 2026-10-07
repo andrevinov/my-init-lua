@@ -19,6 +19,8 @@ Plug('farfanoide/vim-kivy')
 Plug('lepture/vim-jinja')
 Plug('catppuccin/nvim', { ['as'] = 'catppuccin' })
 Plug('lervag/vimtex')
+Plug('L3MON4D3/LuaSnip', { ['tag'] = 'v2.5.0' })
+Plug('iurimateus/luasnip-latex-snippets.nvim')
 Plug('alvan/vim-closetag')
 Plug('AndrewRadev/tagalong.vim')
 Plug('dccsillag/magma-nvim', { ['do'] = ':UpdateRemotePlugins' })
@@ -153,6 +155,64 @@ vim.g.ycm_autoclose_preview_window_after_completion = 1
 vim.g.ycm_semantic_triggers = { python = { 're!\\w{2}' } }
 vim.g.ycm_auto_hover = ''
 vim.opt.completeopt:remove('preview')
+
+------------------------------------------------------------
+-- LaTeX: VimTeX + YouCompleteMe + LuaSnip -------------------
+------------------------------------------------------------
+vim.g.tex_flavor = 'latex'
+vim.g.vimtex_compiler_method = 'latexmk'
+-- A edição e os snippets funcionam mesmo antes de instalar o compilador.
+vim.g.vimtex_compiler_enabled = vim.fn.executable('latexmk')
+if vim.fn.executable('zathura') == 1 then
+  vim.g.vimtex_view_method = 'zathura'
+else
+  vim.g.vimtex_view_method = 'general'
+  vim.g.vimtex_view_general_viewer = 'xdg-open'
+  vim.g.vimtex_view_general_options = '@pdf'
+end
+
+-- O pcall permite abrir o editor para executar :PlugInstall na primeira vez.
+local luasnip_ok, luasnip = pcall(require, 'luasnip')
+if luasnip_ok then
+  luasnip.config.setup({
+    enable_autosnippets = true,
+    update_events = 'TextChanged,TextChangedI',
+    region_check_events = 'CursorMoved,CursorHold',
+    delete_check_events = 'TextChanged',
+  })
+
+  local latex_snippets_ok, latex_snippets =
+    pcall(require, 'luasnip-latex-snippets')
+  if latex_snippets_ok then
+    latex_snippets.setup({
+      use_treesitter = false, -- usa a detecção matemática do VimTeX
+      allow_on_markdown = false, -- atalhos automáticos somente em .tex
+    })
+  end
+end
+
+-- Só habilita idiomas cujos dicionários realmente estão no runtimepath.
+-- pt_br usa o arquivo pt.utf-8.spl; trocar só o nome do idioma não o instala.
+-- Para baixar o português pelo assistente nativo, após iniciar o Neovim:
+--   :setlocal spelllang=pt_br,en spell
+local function configure_tex_spell()
+  vim.opt_local.spell = false
+  local languages = {}
+  for _, language in ipairs({ 'pt_br', 'en' }) do
+    local base = language:match('^[^_]+')
+    for _, encoding in ipairs({ vim.o.encoding, 'ascii' }) do
+      local dictionaries = vim.fn.globpath(
+        vim.o.runtimepath, 'spell/' .. base .. '.' .. encoding .. '.spl', false, true
+      )
+      if #dictionaries > 0 then
+        table.insert(languages, language)
+        break
+      end
+    end
+  end
+  vim.opt_local.spelllang = languages
+  vim.opt_local.spell = #languages > 0
+end
 
 ------------------------------------------------------------
 -- ALE: Ruff + Pyright -------------------------------------
@@ -426,16 +486,60 @@ vim.api.nvim_create_autocmd("FileType", {
 })
 
 vim.api.nvim_create_autocmd("FileType", {
+  group = vim.api.nvim_create_augroup('LatexEditing', { clear = true }),
   pattern = "tex",
-  callback = function()
+  callback = function(args)
     vim.opt_local.expandtab = true
     vim.opt_local.shiftwidth = 2
     vim.opt_local.tabstop = 2
     vim.opt_local.softtabstop = 2
     vim.opt_local.textwidth = 80
     vim.opt_local.conceallevel = 0
-    vim.opt_local.spell = true
-    vim.opt_local.spelllang = {'pt', 'en'}
+    configure_tex_spell()
+
+    -- Mantém os triggers existentes de Python/JS e usa o omnifunc do VimTeX.
+    if vim.b.vimtex then
+      vim.cmd([[
+        let g:ycm_semantic_triggers.tex = g:vimtex#re#youcompleteme
+      ]])
+    end
+
+    local function tex_map(modes, lhs, rhs, description)
+      map(modes, lhs, rhs, {
+        buffer = args.buf, silent = true, desc = description,
+      })
+    end
+
+    -- F5 compila somente LaTeX; fora daqui, mantém o atalho global de TODO.
+    tex_map('n', '<F5>', function()
+      if vim.fn.executable('latexmk') == 0 then
+        vim.notify('LaTeX: instale latexmk e uma distribuição TeX para compilar.',
+          vim.log.levels.WARN)
+        return
+      end
+      vim.cmd('write')
+      vim.cmd('VimtexCompile')
+    end, 'LaTeX: salvar e iniciar/parar compilação contínua')
+    tex_map('n', '<F6>', '<cmd>VimtexView<CR>', 'LaTeX: abrir PDF')
+
+    if not luasnip_ok then return end
+
+    -- Tab/Shift-Tab continuam com o YCM. Snippets usam teclas próprias.
+    -- Automáticos: mk (inline), dm (bloco), // (fração), sq (raiz), sr (quadrado).
+    -- Manuais: sum, lim, pmat etc., seguidos de Ctrl+L dentro da matemática.
+    tex_map({ 'i', 's' }, '<C-l>', function()
+      if luasnip.expandable() then
+        luasnip.expand()
+      elseif luasnip.locally_jumpable(1) then
+        luasnip.jump(1)
+      end
+    end, 'LaTeX: expandir snippet / próximo campo')
+    tex_map({ 'i', 's' }, '<C-k>', function()
+      if luasnip.locally_jumpable(-1) then luasnip.jump(-1) end
+    end, 'LaTeX: campo anterior do snippet')
+    tex_map({ 'i', 's' }, '<C-j>', function()
+      if luasnip.choice_active() then luasnip.change_choice(1) end
+    end, 'LaTeX: próxima alternativa do snippet')
   end,
 })
 
@@ -486,14 +590,6 @@ vim.g.airline_right_alt_sep  = ''
 vim.g['airline#extensions#tabline#enabled'] = 1
 -- (opcional) formatação padrão; altera se quiser outro estilo
 vim.g['airline#extensions#tabline#formatter'] = 'default'
-
-------------------------------------------------------------
--- LaTeX
-------------------------------------------------------------
-
-vim.api.nvim_set_keymap('n', '<F5>', 
-  ':w<CR>:!pdflatex -interaction=nonstopmode %<CR>', 
-  { noremap = true, silent = false })
 
 ------------------------------------------------------------
 -- Comando Teste
