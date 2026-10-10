@@ -1180,6 +1180,63 @@ vim.api.nvim_create_autocmd("FileType", {
 
 
 ------------------------------------------------------------
+-- Markdown: visualizador externo (Calibre) -----------------
+------------------------------------------------------------
+local function open_markdown_in_calibre()
+  if vim.bo.buftype ~= "" or vim.bo.filetype ~= "markdown" then
+    vim.notify("Abra um arquivo Markdown para usar :MarkdownView.", vim.log.levels.WARN)
+    return
+  end
+
+  local path = vim.api.nvim_buf_get_name(0)
+  if path == "" then
+    vim.notify("Salve o Markdown com um nome antes de abrir no Calibre.", vim.log.levels.WARN)
+    return
+  end
+
+  if vim.fn.executable("ebook-viewer") ~= 1 then
+    vim.notify("Calibre não encontrado: ebook-viewer precisa estar no PATH.", vim.log.levels.ERROR)
+    return
+  end
+
+  -- O leitor abre o arquivo em disco; grava também buffers novos ainda vazios.
+  if vim.bo.modified or vim.fn.filereadable(path) ~= 1 then
+    local saved, err = pcall(vim.cmd, "silent write")
+    if not saved then
+      vim.notify("Não foi possível salvar o Markdown: " .. tostring(err), vim.log.levels.ERROR)
+      return
+    end
+  end
+
+  -- A lista de argumentos preserva espaços/acentos sem passar por um shell.
+  -- detach mantém o leitor aberto mesmo depois de fechar o Neovim.
+  local started, job_id = pcall(vim.fn.jobstart, { "ebook-viewer", path }, { detach = true })
+  if not started or job_id <= 0 then
+    vim.notify("Não foi possível iniciar o visualizador do Calibre.", vim.log.levels.ERROR)
+  end
+end
+
+vim.api.nvim_create_user_command("MarkdownView", open_markdown_in_calibre, {
+  desc = "Salvar e abrir o Markdown atual no Calibre",
+})
+
+local markdown_viewer_group =
+  vim.api.nvim_create_augroup("MarkdownViewer", { clear = true })
+
+vim.api.nvim_create_autocmd("FileType", {
+  group = markdown_viewer_group,
+  pattern = "markdown",
+  callback = function(args)
+    map("n", "<leader>mv", "<cmd>MarkdownView<CR>", {
+      buffer = args.buf,
+      silent = true,
+      desc = "Markdown: abrir no Calibre",
+    })
+  end,
+})
+
+
+------------------------------------------------------------
 -- Markdown: comentários ME / AI ---------------------------
 ------------------------------------------------------------
 local markdown_comments_group = vim.api.nvim_create_augroup(
